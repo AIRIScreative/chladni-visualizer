@@ -899,7 +899,7 @@ const LAYER_PRESETS = {
 const SPARE_COLORS = ['#d36bff', '#ffffff', '#ff5a4e', '#4ee6c3', '#ffd166'];
 const hexRgb = h => [1,3,5].map(i => parseInt(h.substr(i, 2), 16));
 function makeLayer(o){
-  const L = Object.assign({name:'Piatto', hex:'#ffd166', lo:100, hi:1000, gain:1, np:14000, on:true, rot:0, scale:1, auto:false}, o);
+  const L = Object.assign({name:'Piatto', hex:'#ffd166', lo:100, hi:1000, gain:1, np:14000, on:true, rot:0, scale:1, auto:true}, o);
   L.ang = 0; L.dA = 0; L.dS = 1; L.rot = Math.max(-8, Math.min(8, +L.rot || 0)); L.scale = Math.max(0.2, Math.min(3, +L.scale || 1));
   L.lo = 20; L.hi = 12000;
   if (L.rig == null) L.rig = L.cx ? Math.sqrt(L.lo*L.hi)/L.cx : Math.sqrt(L.lo*L.hi)/60;   // older saved settings used 'complexity'
@@ -1558,18 +1558,24 @@ function autoTune(now){
     return [v, f];
   };
   for (const L of layers) if (!L.auto || !L.on) { if (L.on && L.dominant >= 0) taken.push(L.f0*modes[L.dominant].k); }
+  // plates stay ordered: each one at least 25% stiffer than the plate before it (softest = lowest resonance)
+  let prevR = 0;
   for (const L of layers) {
-    if (!L.auto || !L.on) continue;
-    const penal = (sc, f) => sc;
-    let [cur, curF] = evalRig(L.autoTarget || L.rig); cur = penal(cur, curF);
+    if (!L.on) continue;
+    if (!L.auto) { prevR = L.rig; continue; }
+    const lb = prevR*1.25, penal = (sc, f, r) => r < lb ? 0 : sc;
+    const r0 = L.autoTarget || L.rig; let [cur, curF] = evalRig(r0); cur = penal(cur, curF, r0);
     let mx = 0, mxR = 0, mxF = 0;
     for (let j = 0; j < 96; j++) {
-      const r = 0.4*Math.pow(300, j/95), [sc, f] = evalRig(r), v = penal(sc, f);
+      const r = 0.4*Math.pow(300, j/95); if (r < lb) continue;
+      const [sc, f] = evalRig(r), v = penal(sc, f, r);
       if (v > mx) { mx = v; mxR = r; mxF = f; }
     }
+    if (!mx && r0 < lb) { L.autoTarget = Math.min(120, lb*1.05); L.autoNote = 0; prevR = L.autoTarget; continue; }
     // switch only when clearly better (20%), so the figure doesn't keep hopping
     if (mx > cur*1.2) { const fp = peakNear(mxF); L.autoTarget = mxR*fp/mxF; L.autoNote = fp; taken.push(fp); }
     else { L.autoTarget = L.autoTarget || L.rig; if (curF) { const fp = peakNear(curF); L.autoTarget *= fp/curF; L.autoNote = fp; taken.push(fp); } }
+    prevR = L.autoTarget;
   }
 }
 // glide towards the chosen resonance without wiping the current figure
@@ -1913,6 +1919,7 @@ function setRich(v){ autoRich = Math.max(0, Math.min(1, +v)); richR.value = Math
 richR.addEventListener('input', () => { setRich(richR.value/100); lastAuto = 0; layers.forEach(L => { if (L.auto) L.autoTarget = null; }); });
 setRich(autoRich);
 try { const saved = JSON.parse(localStorage.getItem(KEY) || 'null'); if (saved) applySettings(saved); } catch (_) {}
+layers.forEach(L => setAuto(L, true));   // every start: automatic resonance on
 
 // ---------- presets: save the whole current setup under a readable name, recall it from the menu ----------
 (() => {
