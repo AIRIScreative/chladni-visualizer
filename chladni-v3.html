@@ -215,6 +215,12 @@
   .hidden{display:none!important}
   .shufGrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12.5px;margin:2px 0 4px}
   .shufGrid label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  /* phone: one slider per row, full width, with a thumb big enough for a finger */
+  @media (max-width:559px){
+    .mini, .mini.three, .mini.four, .layer .mini{grid-template-columns:1fr!important;gap:2px 0!important}
+    input[type=range]:not(.eq input){height:30px!important;margin:2px 0!important}
+    .slider .top, .mini .top{font-size:13px}
+  }
   button.fold{padding:0 6px!important;font-size:11px!important;line-height:18px;min-width:22px}
   .panel.folded > :not(.lbl){display:none!important}
   .panel.folded > .lbl{margin-bottom:0!important}
