@@ -1784,6 +1784,15 @@ async function openOut(){
 }
 outBtn.addEventListener('click', openOut);
 addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch (_) {} });
+
+// tap / click on the visual: spread the sand evenly again (and calm the water), like a fresh start.
+// Only a real tap counts: a drag or a long press does nothing, so scrolling or resting a finger is safe.
+(() => { let t0 = 0, x0 = 0, y0 = 0;
+  cv.addEventListener('pointerdown', e => { t0 = performance.now(); x0 = e.clientX; y0 = e.clientY; });
+  cv.addEventListener('pointerup', e => {
+    if (performance.now() - t0 > 350 || Math.hypot(e.clientX - x0, e.clientY - y0) > 10) return;
+    layers.forEach(L => scatterLayer(L)); if (view === 'water') initWater();
+  }); })();
 try { const saved = JSON.parse(localStorage.getItem(KEY) || 'null'); if (saved) applySettings(saved); } catch (_) {}
 // ---------- shuffle: every N minutes pick new colours / effects / motion / kaleidoscope ----------
 (() => {
