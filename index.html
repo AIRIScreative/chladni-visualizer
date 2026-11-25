@@ -347,6 +347,10 @@
           <div class="top"><span>Auto «A»: semplice ↔ ricca</span><span id="richVal"></span></div>
           <input id="autoRich" type="range" min="0" max="100" step="1" value="80">
         </div>
+        <div class="slider" title="Quanto sono distanti le risonanze dei piatti automatici: il più rigido resta dov'è, i più morbidi scendono">
+          <div class="top"><span>Distanza tra i piatti</span><span id="spreadVal"></span></div>
+          <input id="autoSpread" type="range" min="125" max="400" step="5" value="200">
+        </div>
         <div id="layers"></div>
       </div>
       <div class="panel">
@@ -1514,7 +1518,7 @@ function alignAll(){
 // tries stiffness values on a log grid and keeps the one whose resonances best catch a strong note of the music,
 // preferring figures of medium complexity and avoiding the note another auto plate already uses
 function setAuto(L, on){ L.auto = on; if (L.autoBtn) L.autoBtn.classList.toggle('on', on); if (!on) { L.autoTarget = null; L.autoNote = 0; } }
-let lastAuto = 0, autoRich = 0.8;
+let lastAuto = 0, autoRich = 0.8, autoSpread = 2;
 function autoTune(now){
   if (!ctx || !avgAm || now - lastAuto < 400) return; lastAuto = now;
   const binHz = ctx.sampleRate/analyser.fftSize, nb = avgAm.length;
@@ -1533,7 +1537,7 @@ function autoTune(now){
   const nF = fbFrames.length, scale = FB_N/Math.log(FB_HI/FB_LO);
   // the complexity the user asked for, as a position in this plate's own list of figures (0 = simplest, 1 = densest)
   const ks = modes.map(m => m.k).filter(k => k > 0).sort((a, b) => a - b), kTarget = ks[Math.min(ks.length-1, Math.round(autoRich*(ks.length-1)))] || 40;
-  const evalRig = r => {
+  const evalRig = (r, kT = kTarget) => {
     if (nF < 8) return [0, 0];
     const hist = new Map(); let wsum = 0, pure = 0, loud = 0, gl = 1e-9;
     for (let t = 0; t < nF; t++) if (fbLoud[t] > gl) gl = fbLoud[t];
@@ -1553,29 +1557,34 @@ function autoTune(now){
     const f = r*modes[kb].k, stab = hb/wsum, pu = pure/wsum;
     const lv = loud/wsum/Math.max(1e-9, gmax);
     // purity only matters for simple figures: rich figures are meant to blend neighbouring modes
-    let v = stab*(0.25 + 0.75*pu*(1 - autoRich))*Math.sqrt(Math.min(1, lv))*Math.exp(-Math.pow(Math.log(modes[kb].k/kTarget), 2)/(2*0.45*0.45));
+    let v = stab*(0.25 + 0.75*pu*(1 - autoRich))*Math.sqrt(Math.min(1, lv))*Math.exp(-Math.pow(Math.log(modes[kb].k/kT), 2)/(2*0.45*0.45));
     if (taken.some(tf => Math.abs(Math.log(f/tf)) < 0.06)) v *= 0.12;
     return [v, f];
   };
   for (const L of layers) if (!L.auto || !L.on) { if (L.on && L.dominant >= 0) taken.push(L.f0*modes[L.dominant].k); }
-  // plates stay ordered: each one at least 25% stiffer than the plate before it (softest = lowest resonance)
-  let prevR = 0;
-  for (const L of layers) {
+  // plates stay ordered (softest = lowest resonance): the stiffest plate is placed first, then every softer plate
+  // must sit at least «spread» times lower than the one above it — the spacing grows downwards, never upwards
+  // the softest plate gets the complexity asked for; each stiffer plate a figure «spread» times simpler, so on the same
+  // notes their resonances naturally sit «spread» times apart
+  let nextR = Infinity;
+  const autos = layers.filter(L => L.on && L.auto);
+  for (const L of [...layers].reverse()) {
     if (!L.on) continue;
-    if (!L.auto) { prevR = L.rig; continue; }
-    const lb = prevR*1.25, penal = (sc, f, r) => r < lb ? 0 : sc;
-    const r0 = L.autoTarget || L.rig; let [cur, curF] = evalRig(r0); cur = penal(cur, curF, r0);
+    if (!L.auto) { nextR = L.rig; continue; }
+    const kT = Math.max(2, kTarget/Math.pow(autoSpread, autos.indexOf(L)));
+    const ub = nextR/autoSpread, penal = (sc, f, r) => r > ub ? 0 : sc;
+    const r0 = L.autoTarget || L.rig; let [cur, curF] = evalRig(r0, kT); cur = penal(cur, curF, r0);
     let mx = 0, mxR = 0, mxF = 0;
-    for (let j = 0; j < 96; j++) {
-      const r = 0.4*Math.pow(300, j/95); if (r < lb) continue;
-      const [sc, f] = evalRig(r), v = penal(sc, f, r);
+    for (let j = 0; j < 120; j++) {
+      const r = 0.06*Math.pow(2000, j/119); if (r > ub) break;
+      const [sc, f] = evalRig(r, kT), v = penal(sc, f, r);
       if (v > mx) { mx = v; mxR = r; mxF = f; }
     }
-    if (!mx && r0 < lb) { L.autoTarget = Math.min(120, lb*1.05); L.autoNote = 0; prevR = L.autoTarget; continue; }
+    if (!mx && r0 > ub) { L.autoTarget = Math.max(0.05, ub*0.95); L.autoNote = 0; nextR = L.autoTarget; continue; }
     // switch only when clearly better (20%), so the figure doesn't keep hopping
     if (mx > cur*1.2) { const fp = peakNear(mxF); L.autoTarget = mxR*fp/mxF; L.autoNote = fp; taken.push(fp); }
     else { L.autoTarget = L.autoTarget || L.rig; if (curF) { const fp = peakNear(curF); L.autoTarget *= fp/curF; L.autoNote = fp; taken.push(fp); } }
-    prevR = L.autoTarget;
+    nextR = L.autoTarget;
   }
 }
 // glide towards the chosen resonance without wiping the current figure
@@ -1637,7 +1646,7 @@ motionLabels();
 // ---------- plates panel ----------
 const layersEl = document.getElementById('layers');
 const s2hz = v => 20*Math.pow(600, v/1000), hz2s = f => 1000*Math.log(f/20)/Math.log(600);
-const s2rig = v => 0.3*Math.pow(400, v/1000), rig2s = r => 1000*Math.log(r/0.3)/Math.log(400), fmtRig = r => r < 10 ? r.toFixed(1) : Math.round(r);
+const s2rig = v => 0.05*Math.pow(2400, v/1000), rig2s = r => 1000*Math.log(r/0.05)/Math.log(2400), fmtRig = r => r < 1 ? r.toFixed(2) : r < 10 ? r.toFixed(1) : Math.round(r);
 const fmtRot = r => r === 0 ? '0' : (r > 0 ? '↻' : '↺') + Math.abs(r);
 const fmtHz = f => f >= 1000 ? (f/1000).toFixed(f >= 10000 ? 0 : 1).replace('.0','') + 'k' : Math.round(f);
 function renderLayers(){
@@ -1758,7 +1767,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 const KEY = 'chladniSettings.v3';
 let restoring = false, saveTimer = null;
 function snapshot(){
-  return { autoRich, shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
+  return { autoRich, autoSpread, shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
            layers: layers.map(L => ({name: L.name, hex: L.hex, lo: L.lo, hi: L.hi, rig: L.rig, gain: L.gain, on: L.on, rot: L.rot, scale: L.scale, auto: L.auto})) };
 }
 function saveSettings(){
@@ -1787,6 +1796,7 @@ function applySettings(o){
     if (o.kOn != null) setKOn(!!o.kOn);
     if (o.kMode) setKMode(o.kMode);
     if (o.autoRich != null) setRich(o.autoRich);
+    if (o.autoSpread != null) setSpread(o.autoSpread);
     if (o.kSeg) { kSeg = +o.kSeg; kSegR.value = kSeg; }
     if (o.kSpeed != null) { kSpeed = +o.kSpeed; kSpeedR.value = kSpeed; }
     if (o.kAngle != null) { kAngle = +o.kAngle; kAngleR.value = kAngle; }
@@ -1897,7 +1907,7 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
     if (!base) { base = layers.map(L => L.rig); layers.forEach(L => setAuto(L, false)); }
     // full width of the visual = ×4 (or ÷4); clamp the factor so no plate leaves 0.3–120 and the ratios stay intact
     const w = cv.getBoundingClientRect().width || 300;
-    let f = Math.pow(4, dx/w); const lo = Math.max(...base.map(r => 0.3/r)), hi = Math.min(...base.map(r => 120/r)); f = Math.min(hi, Math.max(lo, f));
+    let f = Math.pow(4, dx/w); const lo = Math.max(...base.map(r => 0.05/r)), hi = Math.min(...base.map(r => 120/r)); f = Math.min(hi, Math.max(lo, f));
     layers.forEach((L, i) => { L.rig = base[i]*f; setF0(L); if (L.rigEl) { L.rigEl.value = rig2s(L.rig); L.rigLbl.textContent = fmtRig(L.rig); } });
     show('Risonanza  ' + layers.map(L => fmtRig(L.rig)).join(' · '));
   });
@@ -1916,6 +1926,10 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
 const richR = document.getElementById('autoRich'), richV = document.getElementById('richVal');
 function setRich(v){ autoRich = Math.max(0, Math.min(1, +v)); richR.value = Math.round(autoRich*100);
   richV.textContent = autoRich < 0.25 ? 'semplice' : autoRich < 0.5 ? 'media' : autoRich < 0.75 ? 'ricca' : 'molto ricca'; }
+const sprR = document.getElementById('autoSpread'), sprV = document.getElementById('spreadVal');
+function setSpread(v){ autoSpread = Math.max(1.25, Math.min(4, +v)); sprR.value = Math.round(autoSpread*100); sprV.textContent = '×' + autoSpread.toFixed(2); }
+sprR.addEventListener('input', () => { setSpread(sprR.value/100); lastAuto = 0; layers.forEach(L => { if (L.auto) L.autoTarget = null; }); });
+setSpread(autoSpread);
 richR.addEventListener('input', () => { setRich(richR.value/100); lastAuto = 0; layers.forEach(L => { if (L.auto) L.autoTarget = null; }); });
 setRich(autoRich);
 try { const saved = JSON.parse(localStorage.getItem(KEY) || 'null'); if (saved) applySettings(saved); } catch (_) {}
