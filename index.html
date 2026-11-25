@@ -1045,6 +1045,13 @@ const HEAT = []; function buildHeat(ST){ HEAT.length = 0; for (let i = 0; i < 25
   const [t0, c0] = ST[k], [t1, c1] = ST[k+1], u = (t - t0)/(t1 - t0); HEAT.push(c0.map((v, j) => v + (c1[j] - v)*u)); } }
 buildHeat(FLAME);
 // 'Ruota colori' turns the chosen theme's colours around the plate (closed loop: last colour flows back into the first)
+// any theme can drive «Calore»: its colours sorted from darkest to brightest, with a dim version of the darkest for still grains
+function heatFromPalette(P){
+  const lum = c => 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  const cs = P.map(hexRgb).sort((a, b) => lum(a) - lum(b));
+  const dark = cs[0].map(v => v*0.28), all = [dark, ...cs];
+  return all.map((c, i) => [i/(all.length-1), c]);
+}
 const SPIN = HUE.slice();
 function buildSpin(P){ SPIN.length = 0; if (!P) { HUE.forEach(c => SPIN.push(c)); return; } const cs = P.map(hexRgb), n = cs.length;
   for (let h = 0; h < 360; h++) { const p = h/360*n, k = Math.floor(p) % n, u = p - Math.floor(p), a = cs[k], b = cs[(k+1) % n]; SPIN.push(a.map((v, j) => v + (b[j] - v)*u)); } }
@@ -1453,7 +1460,8 @@ function setTheme(t, recolor = true){
   }
   themeLUT = THEMES[theme].plates ? paletteLUT(THEMES[theme].plates) : null;
   buildSpin(THEMES[theme].plates);
-  buildHeat(THEMES[theme].heat ? THEMES[theme].heat.map((h, i, a) => [i/(a.length-1), hexRgb(h)]) : FLAME);
+  buildHeat(THEMES[theme].heat ? THEMES[theme].heat.map((h, i, a) => [i/(a.length-1), hexRgb(h)])
+          : (THEMES[theme].plates && theme !== 'calore') ? heatFromPalette(THEMES[theme].plates) : FLAME);
   if (recolor) setBgFromTheme();
   buildBg(); wInner = effInner();
 }
