@@ -101,7 +101,10 @@
   body.stagemode .side, body.stagemode .bottombar{display:none}
   body.stagemode .app{grid-template-columns:1fr;padding:0;gap:0;height:100vh}
   body.stagemode{overflow:hidden}
-  body.stagemode #stageBtn{opacity:0;transition:opacity .3s}
+  body.stagemode .stage{position:fixed!important;inset:0;height:auto!important;z-index:50;background:#000;border-radius:0}
+  body.stagemode .center{position:static!important}
+  body.stagemode #stageBtn{opacity:.3;transition:opacity .3s;position:fixed;z-index:60}
+  @media (hover:hover){ body.stagemode #stageBtn{opacity:0} }
   body.stagemode .stage:hover #stageBtn{opacity:.6}
   @media (max-height:820px) and (min-width:1100px){
     .pieces button small{display:none}
