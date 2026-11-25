@@ -192,6 +192,9 @@
   .layer .mini{grid-template-columns:1fr 1fr;gap:2px 12px}
   .layer .mini label{white-space:nowrap;overflow:hidden}
   .rigrow{display:flex;align-items:center;gap:4px}
+  .layer .lt{display:flex;justify-content:space-between;align-items:center;gap:6px;min-height:18px;font-size:11px}
+  .layer .lt .rigv,.layer .lt .rotv,.layer .lt .sclv,.layer .lt .gainv{color:var(--ink);font-variant-numeric:tabular-nums}
+  .layer .lauto{padding:0 5px!important;font-size:10px!important;line-height:15px}
   .layer .lauto{width:auto;flex:none}
   .lauto{padding:0 4px!important;margin-left:0;font-size:9px!important;line-height:13px;border-radius:4px;vertical-align:1px}
   .lauto.on{background:var(--accent);color:#1a1408;border-color:var(--accent)}
@@ -1594,10 +1597,10 @@ function renderLayers(){
         <input type="color" class="lcol" value="${L.hex}" title="Colore del piatto">
         ${layers.length > 1 ? '<button class="ldel" title="Rimuovi">✕</button>' : ''}</div>
       <div class="mini">
-        <label title="Risonanza (rigidità del piatto): sposta le frequenze a cui questo piatto risponde">risonanza <span class="rigrow"><span class="rigv">${fmtRig(L.rig)}</span><button class="lauto${L.auto ? ' on' : ''}" title="Autorisonanza: cerca da sola la risonanza migliore per questo piatto">A</button></span><input type="range" class="lrig" min="0" max="1000" value="${rig2s(L.rig)}"></label>
-        <label title="Intensità">intens.<input type="range" class="lgain" min="0.2" max="3" step="0.1" value="${L.gain}"></label>
-        <label title="Rotazione (doppio clic: ferma e riallinea)">rot. <span class="rotv">${fmtRot(L.rot)}</span><input type="range" class="lrot" min="-8" max="8" step="0.25" value="${L.rot}"></label>
-        <label title="Scala (doppio clic: 100%)">scala <span class="sclv">${Math.round(L.scale*100)}%</span><input type="range" class="lscl" min="20" max="300" step="1" value="${Math.round(L.scale*100)}"></label></div>`;
+        <label title="Risonanza (rigidità del piatto): sposta le frequenze a cui questo piatto risponde"><span class="lt"><span>risonanza</span><span class="rigrow"><span class="rigv">${fmtRig(L.rig)}</span><button class="lauto${L.auto ? ' on' : ''}" title="Autorisonanza: cerca da sola la risonanza migliore per questo piatto">A</button></span></span><input type="range" class="lrig" min="0" max="1000" value="${rig2s(L.rig)}"></label>
+        <label title="Intensità"><span class="lt"><span>intensità</span><span class="gainv">${(+L.gain).toFixed(1)}×</span></span><input type="range" class="lgain" min="0.2" max="3" step="0.1" value="${L.gain}"></label>
+        <label title="Rotazione (doppio clic: ferma e riallinea)"><span class="lt"><span>rotazione</span><span class="rotv">${fmtRot(L.rot)}</span></span><input type="range" class="lrot" min="-8" max="8" step="0.25" value="${L.rot}"></label>
+        <label title="Scala (doppio clic: 100%)"><span class="lt"><span>scala</span><span class="sclv">${Math.round(L.scale*100)}%</span></span><input type="range" class="lscl" min="20" max="300" step="1" value="${Math.round(L.scale*100)}"></label></div>`;
     const q = c => d.querySelector(c);
     q('.lon').onchange = e => { L.on = e.target.checked; d.classList.toggle('off', !L.on); };
     q('.lname').oninput = e => { L.name = e.target.value || 'Piatto'; buildReadout(); };
@@ -1609,7 +1612,7 @@ function renderLayers(){
     L.rigEl = q('.lrig'); L.rigLbl = q('.rigv'); L.autoBtn = q('.lauto');
     q('.lrig').oninput = e => { L.rig = s2rig(+e.target.value); q('.rigv').textContent = fmtRig(L.rig); setF0(L); setAuto(L, false); };
     q('.lauto').onclick = e => { e.preventDefault(); e.stopPropagation(); setAuto(L, !L.auto); };
-    q('.lgain').oninput = e => { L.gain = +e.target.value; };
+    q('.lgain').oninput = e => { L.gain = +e.target.value; q('.gainv').textContent = L.gain.toFixed(1) + '×'; };
     if (q('.ldel')) q('.ldel').onclick = () => {
       layers.splice(i, 1);
       shareGrains(); renderLayers(); buildReadout(); };
