@@ -1798,13 +1798,35 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
 
 // gestures on the visual: a quick tap shuffles (the parts ticked in «Casuale»);
 // a horizontal drag scales every plate's rigidity (resonance), a vertical drag every plate's intensity — always by the same factor, so the relations between plates are kept
-(() => { let t0 = 0, x0 = 0, y0 = 0, lastX = 0, mode = null, base = null, tipT = 0;
+// two fingers opening / closing (or a trackpad pinch) scale every plate by the same factor
+(() => { let t0 = 0, x0 = 0, y0 = 0, lastX = 0, mode = null, base = null, tipT = 0, d0 = 0; const pts = new Map();
   const tip = document.createElement('div');
   tip.style.cssText = 'position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:5;background:rgba(14,15,17,.8);border:1px solid #343840;color:#e8e4da;font:600 13px system-ui,sans-serif;padding:6px 12px;border-radius:9px;pointer-events:none;opacity:0;transition:opacity .4s';
   stageEl.appendChild(tip);
   const show = t => { tip.textContent = t; tip.style.opacity = 1; clearTimeout(tipT); tipT = setTimeout(() => { tip.style.opacity = 0; }, 900); };
-  cv.addEventListener('pointerdown', e => { t0 = performance.now(); x0 = lastX = e.clientX; y0 = e.clientY; mode = null; base = null; try { cv.setPointerCapture(e.pointerId); } catch (_) {} });
+  const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+  function setScales(f){
+    const lo = Math.max(...base.map(v => 0.2/v)), hi = Math.min(...base.map(v => 3/v)); f = Math.min(hi, Math.max(lo, f));
+    layers.forEach((L, i) => { L.scale = Math.round(base[i]*f*100)/100; });
+    layersEl.querySelectorAll('.layer').forEach((d, i) => { const L = layers[i]; if (!L) return; const r = d.querySelector('.lscl'), v = d.querySelector('.sclv'); if (r) r.value = Math.round(L.scale*100); if (v) v.textContent = Math.round(L.scale*100) + '%'; });
+    show('Scala  ' + layers.map(L => Math.round(L.scale*100) + '%').join(' · '));
+  }
+  cv.addEventListener('pointerdown', e => {
+    pts.set(e.pointerId, {x: e.clientX, y: e.clientY}); try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pts.size === 2 && layers.length) {   // second finger: switch to pinch; undo whatever the first finger had started
+      if (base && mode === 'rig') layers.forEach((L, i) => { L.rig = base[i]; setF0(L); });
+      if (base && mode === 'gain') layers.forEach((L, i) => { L.gain = base[i]; });
+      mode = 'pinch'; base = layers.map(L => L.scale); d0 = dist(); return;
+    }
+    if (pts.size > 2) return;
+    t0 = performance.now(); x0 = lastX = e.clientX; y0 = e.clientY; mode = null; base = null; });
+  cv.addEventListener('wheel', e => {   // trackpad pinch arrives as ctrl + wheel
+    if (!e.ctrlKey || !layers.length) return; e.preventDefault();
+    base = layers.map(L => L.scale); setScales(Math.exp(-e.deltaY*0.01)); base = null; clearTimeout(cv._wsave); cv._wsave = setTimeout(saveSettings, 400);
+  }, {passive: false});
   cv.addEventListener('pointermove', e => {
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    if (mode === 'pinch' || mode === 'pinchdone') { if (mode === 'pinch' && pts.size === 2) setScales(dist()/d0); return; }
     if (!t0) return; const dx = e.clientX - x0, dy = e.clientY - y0;
     if (!mode && Math.hypot(dx, dy) > 10) mode = Math.abs(dx) > Math.abs(dy) ? 'rig' : 'gain';
     if (!layers.length || !mode) return;
@@ -1825,6 +1847,8 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
     show('Risonanza  ' + layers.map(L => fmtRig(L.rig)).join(' · '));
   });
   const end = e => {
+    pts.delete(e.pointerId);
+    if (mode === 'pinch' || mode === 'pinchdone') { if (mode === 'pinch') saveSettings(); mode = pts.size ? 'pinchdone' : null; if (!pts.size) { t0 = 0; base = null; } return; }
     if (!t0) return; const quick = performance.now() - t0 < 350 && Math.hypot(e.clientX - x0, e.clientY - y0) < 10;
     if (mode === 'rig' || mode === 'gain') saveSettings();
     else if (quick && e.type === 'pointerup') { document.getElementById('shufNow').click(); show('Casuale'); }
