@@ -343,6 +343,10 @@
         <div class="row" id="layerPresets">
           <span class="note" style="margin:0">Preset</span><button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button><button id="addLayer" title="Aggiungi un piatto">+ Piatto</button>
         </div>
+        <div class="slider" title="Che figure cerca il pulsante A: semplici e stabili, o ricche e dettagliate">
+          <div class="top"><span>Auto «A»: semplice ↔ ricca</span><span id="richVal"></span></div>
+          <input id="autoRich" type="range" min="0" max="100" step="1" value="80">
+        </div>
         <div id="layers"></div>
       </div>
       <div class="panel">
@@ -1510,7 +1514,7 @@ function alignAll(){
 // tries stiffness values on a log grid and keeps the one whose resonances best catch a strong note of the music,
 // preferring figures of medium complexity and avoiding the note another auto plate already uses
 function setAuto(L, on){ L.auto = on; if (L.autoBtn) L.autoBtn.classList.toggle('on', on); if (!on) { L.autoTarget = null; L.autoNote = 0; } }
-let lastAuto = 0;
+let lastAuto = 0, autoRich = 0.8;
 function autoTune(now){
   if (!ctx || !avgAm || now - lastAuto < 400) return; lastAuto = now;
   const binHz = ctx.sampleRate/analyser.fftSize, nb = avgAm.length;
@@ -1527,15 +1531,20 @@ function autoTune(now){
   // wins frame after frame (stable) and clearly beats the runner-up (pure); loud enough to move the grains; very trivial or
   // very dense figures count a little less
   const nF = fbFrames.length, scale = FB_N/Math.log(FB_HI/FB_LO);
+  // the complexity the user asked for, as a position in this plate's own list of figures (0 = simplest, 1 = densest)
+  const ks = modes.map(m => m.k).filter(k => k > 0).sort((a, b) => a - b), kTarget = ks[Math.min(ks.length-1, Math.round(autoRich*(ks.length-1)))] || 40;
   const evalRig = r => {
     if (nF < 8) return [0, 0];
     const hist = new Map(); let wsum = 0, pure = 0, loud = 0, gl = 1e-9;
     for (let t = 0; t < nF; t++) if (fbLoud[t] > gl) gl = fbLoud[t];
     for (let t = 0; t < nF; t++) {
-      const fr = fbFrames[t]; let m1 = 0, m2 = 0, k1 = -1;
+      const fr = fbFrames[t]; let m1 = 0, m2 = 0, k1 = -1, f1 = 0;
       for (let k = 0; k < modes.length; k++) { const f = r*modes[k].k; if (f < 30 || f > 9000) continue;
         const i = Math.floor(Math.log(f/FB_LO)*scale); const v = Math.max(fr[i] || 0, fr[i+1] || 0, fr[i-1] || 0);
-        if (v > m1) { m2 = m1; m1 = v; k1 = k; } else if (v > m2) m2 = v; }
+        if (v > m1) { m1 = v; k1 = k; f1 = f; } }
+      // runner-up = strongest mode on a DIFFERENT note (neighbours on the same note just blend into the same figure)
+      for (let k = 0; k < modes.length; k++) { const f = r*modes[k].k; if (f < 30 || f > 9000 || Math.abs(Math.log(f/f1)) < 0.05) continue;
+        const i = Math.floor(Math.log(f/FB_LO)*scale); const v = Math.max(fr[i] || 0, fr[i+1] || 0, fr[i-1] || 0); if (v > m2) m2 = v; }
       if (k1 < 0 || m1 <= 0) continue;
       const w = fbLoud[t]/gl; wsum += w; hist.set(k1, (hist.get(k1) || 0) + w); pure += w*(1 - m2/m1); loud += w*m1;
     }
@@ -1543,7 +1552,8 @@ function autoTune(now){
     let kb = -1, hb = 0; for (const [k, h] of hist) if (h > hb) { hb = h; kb = k; }
     const f = r*modes[kb].k, stab = hb/wsum, pu = pure/wsum;
     const lv = loud/wsum/Math.max(1e-9, gmax);
-    let v = Math.pow(stab, 1.5)*pu*Math.sqrt(Math.min(1, lv))*Math.exp(-Math.pow(Math.log(modes[kb].k/40), 2)/(2*2.2*2.2));
+    // purity only matters for simple figures: rich figures are meant to blend neighbouring modes
+    let v = stab*(0.25 + 0.75*pu*(1 - autoRich))*Math.sqrt(Math.min(1, lv))*Math.exp(-Math.pow(Math.log(modes[kb].k/kTarget), 2)/(2*0.45*0.45));
     if (taken.some(tf => Math.abs(Math.log(f/tf)) < 0.06)) v *= 0.12;
     return [v, f];
   };
@@ -1742,7 +1752,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 const KEY = 'chladniSettings.v3';
 let restoring = false, saveTimer = null;
 function snapshot(){
-  return { shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
+  return { autoRich, shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
            layers: layers.map(L => ({name: L.name, hex: L.hex, lo: L.lo, hi: L.hi, rig: L.rig, gain: L.gain, on: L.on, rot: L.rot, scale: L.scale, auto: L.auto})) };
 }
 function saveSettings(){
@@ -1770,6 +1780,7 @@ function applySettings(o){
         pendolo:['none','pendolo'], caleido:['scambio','contrapposti'], battito:['battito','battito'], casuale:['casuale','casuale']}[o.motion] || ['none','none']; o.mScale = map[0]; o.mRot = map[1]; }
     if (o.kOn != null) setKOn(!!o.kOn);
     if (o.kMode) setKMode(o.kMode);
+    if (o.autoRich != null) setRich(o.autoRich);
     if (o.kSeg) { kSeg = +o.kSeg; kSegR.value = kSeg; }
     if (o.kSpeed != null) { kSpeed = +o.kSpeed; kSpeedR.value = kSpeed; }
     if (o.kAngle != null) { kAngle = +o.kAngle; kAngleR.value = kAngle; }
@@ -1894,6 +1905,13 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
   };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
 })();
+
+// how rich the figures chosen by «A» should be
+const richR = document.getElementById('autoRich'), richV = document.getElementById('richVal');
+function setRich(v){ autoRich = Math.max(0, Math.min(1, +v)); richR.value = Math.round(autoRich*100);
+  richV.textContent = autoRich < 0.25 ? 'semplice' : autoRich < 0.5 ? 'media' : autoRich < 0.75 ? 'ricca' : 'molto ricca'; }
+richR.addEventListener('input', () => { setRich(richR.value/100); lastAuto = 0; layers.forEach(L => { if (L.auto) L.autoTarget = null; }); });
+setRich(autoRich);
 try { const saved = JSON.parse(localStorage.getItem(KEY) || 'null'); if (saved) applySettings(saved); } catch (_) {}
 
 // ---------- presets: save the whole current setup under a readable name, recall it from the menu ----------
