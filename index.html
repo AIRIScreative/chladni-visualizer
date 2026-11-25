@@ -912,6 +912,18 @@ function bandW(f, L){
   return Math.min(wa, wb);
 }
 
+// ---------- recent instant spectra on a log grid (for the auto-resonance, which replays them) ----------
+const FB_LO = 25, FB_HI = 10000, FB_N = 256, FB_KEEP = 40, fbFrames = [], fbLoud = [];
+let fbLast = 0, fbMap = null;
+function recordFrame(a, binHz, bMax){
+  const now = performance.now(); if (now - fbLast < 100) return; fbLast = now;
+  if (!fbMap || fbMap.binHz !== binHz) { fbMap = {binHz, lo: new Int32Array(FB_N), hi: new Int32Array(FB_N)};
+    for (let i = 0; i < FB_N; i++) { const f0 = FB_LO*Math.pow(FB_HI/FB_LO, i/FB_N), f1 = FB_LO*Math.pow(FB_HI/FB_LO, (i+1)/FB_N);
+      fbMap.lo[i] = Math.max(2, Math.floor(f0/binHz)); fbMap.hi[i] = Math.max(fbMap.lo[i], Math.min(bMax-1, Math.ceil(f1/binHz))); } }
+  const fr = new Float32Array(FB_N); let tot = 0;
+  for (let i = 0; i < FB_N; i++) { let m = 0; for (let b = fbMap.lo[i]; b <= fbMap.hi[i]; b++) if (a[b] > m) m = a[b]; fr[i] = m; tot += m; }
+  fbFrames.push(fr); fbLoud.push(tot); if (fbFrames.length > FB_KEEP) { fbFrames.shift(); fbLoud.shift(); }
+}
 // ---------- analysis ----------
 let gPeak = 1e-4, pw = null, am = null, avgAm = null, pwF = new Float32Array(1024);
 function analyse(){
@@ -926,6 +938,7 @@ function analyse(){
   let ge = 0;
   if (!avgAm) avgAm = new Float32Array(spec.length);
   for (let b = 2; b < bMax; b++) { am[b] = Math.pow(10, spec[b]/20)*eqBin[b]; pw[b] = am[b]*am[b]; ge += pw[b]; avgAm[b] = avgAm[b]*0.97 + am[b]*0.03; }
+  recordFrame(am, binHz, bMax);
   // fast window: loudness per band, follows the beat
   analyserF.getFloatFrequencyData(specF);
   const bHzF = ctx.sampleRate / analyserF.fftSize, bMaxF = Math.min(specF.length, Math.floor(12000/bHzF));
@@ -1497,7 +1510,6 @@ function alignAll(){
 // tries stiffness values on a log grid and keeps the one whose resonances best catch a strong note of the music,
 // preferring figures of medium complexity and avoiding the note another auto plate already uses
 function setAuto(L, on){ L.auto = on; if (L.autoBtn) L.autoBtn.classList.toggle('on', on); if (!on) { L.autoTarget = null; L.autoNote = 0; } }
-const beauty = k => Math.exp(-Math.pow(Math.log(k/50), 2)/(2*0.9*0.9));
 let lastAuto = 0;
 function autoTune(now){
   if (!ctx || !avgAm || now - lastAuto < 400) return; lastAuto = now;
@@ -1511,17 +1523,38 @@ function autoTune(now){
     if (bm < 0) return f; const a = avgAm[bm-1], c = avgAm[bm+1], den = a - 2*m + c, off = den < 0 ? Math.max(-0.5, Math.min(0.5, 0.5*(a - c)/den)) : 0;
     return (bm + off)*binHz; };
   const taken = [];
-  // best note this stiffness would catch; notes another plate already uses count much less
-  const evalRig = r => { let best = 0, bf = 0; for (const md of modes) { const f = r*md.k; if (f < 30 || f > 9000) continue;
-    let v = magAt(f)*beauty(md.k); if (taken.some(tf => Math.abs(Math.log(f/tf)) < 0.06)) v *= 0.12; if (v > best) { best = v; bf = f; } } return [best, bf]; };
+  // what the sand would draw at stiffness r, replayed over the last ~4 s of music: the figure is clean when the same mode
+  // wins frame after frame (stable) and clearly beats the runner-up (pure); loud enough to move the grains; very trivial or
+  // very dense figures count a little less
+  const nF = fbFrames.length, scale = FB_N/Math.log(FB_HI/FB_LO);
+  const evalRig = r => {
+    if (nF < 8) return [0, 0];
+    const hist = new Map(); let wsum = 0, pure = 0, loud = 0, gl = 1e-9;
+    for (let t = 0; t < nF; t++) if (fbLoud[t] > gl) gl = fbLoud[t];
+    for (let t = 0; t < nF; t++) {
+      const fr = fbFrames[t]; let m1 = 0, m2 = 0, k1 = -1;
+      for (let k = 0; k < modes.length; k++) { const f = r*modes[k].k; if (f < 30 || f > 9000) continue;
+        const i = Math.floor(Math.log(f/FB_LO)*scale); const v = Math.max(fr[i] || 0, fr[i+1] || 0, fr[i-1] || 0);
+        if (v > m1) { m2 = m1; m1 = v; k1 = k; } else if (v > m2) m2 = v; }
+      if (k1 < 0 || m1 <= 0) continue;
+      const w = fbLoud[t]/gl; wsum += w; hist.set(k1, (hist.get(k1) || 0) + w); pure += w*(1 - m2/m1); loud += w*m1;
+    }
+    if (wsum <= 0) return [0, 0];
+    let kb = -1, hb = 0; for (const [k, h] of hist) if (h > hb) { hb = h; kb = k; }
+    const f = r*modes[kb].k, stab = hb/wsum, pu = pure/wsum;
+    const lv = loud/wsum/Math.max(1e-9, gmax);
+    let v = Math.pow(stab, 1.5)*pu*Math.sqrt(Math.min(1, lv))*Math.exp(-Math.pow(Math.log(modes[kb].k/40), 2)/(2*2.2*2.2));
+    if (taken.some(tf => Math.abs(Math.log(f/tf)) < 0.06)) v *= 0.12;
+    return [v, f];
+  };
   for (const L of layers) if (!L.auto || !L.on) { if (L.on && L.dominant >= 0) taken.push(L.f0*modes[L.dominant].k); }
   for (const L of layers) {
     if (!L.auto || !L.on) continue;
     const penal = (sc, f) => sc;
     let [cur, curF] = evalRig(L.autoTarget || L.rig); cur = penal(cur, curF);
     let mx = 0, mxR = 0, mxF = 0;
-    for (let j = 0; j < 72; j++) {
-      const r = 0.5*Math.pow(240, j/71), [sc, f] = evalRig(r), v = penal(sc, f);
+    for (let j = 0; j < 96; j++) {
+      const r = 0.4*Math.pow(300, j/95), [sc, f] = evalRig(r), v = penal(sc, f);
       if (v > mx) { mx = v; mxR = r; mxF = f; }
     }
     // switch only when clearly better (20%), so the figure doesn't keep hopping
