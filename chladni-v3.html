@@ -351,6 +351,10 @@
           <div class="top"><span>Distanza tra i piatti</span><span id="spreadVal"></span></div>
           <input id="autoSpread" type="range" min="125" max="400" step="5" value="200">
         </div>
+        <div class="slider" title="Quando una figura resta ferma ~1,5 s, sposta per un attimo la risonanza per farla rivivere (solo piatti con A acceso)">
+          <div class="top"><span>Vita della figura</span><span id="varyVal"></span></div>
+          <input id="autoVary" type="range" min="0" max="100" step="5" value="50">
+        </div>
         <div id="layers"></div>
       </div>
       <div class="panel">
@@ -1526,7 +1530,7 @@ function alignAll(){
 // tries stiffness values on a log grid and keeps the one whose resonances best catch a strong note of the music,
 // preferring figures of medium complexity and avoiding the note another auto plate already uses
 function setAuto(L, on){ L.auto = on; if (L.autoBtn) L.autoBtn.classList.toggle('on', on); if (!on) { L.autoTarget = null; L.autoNote = 0; } }
-let lastAuto = 0, autoRich = 0.8, autoSpread = 2;
+let lastAuto = 0, autoRich = 0.8, autoSpread = 2, autoVary = 0.5;
 function autoTune(now){
   if (!ctx || !avgAm || now - lastAuto < 400) return; lastAuto = now;
   const binHz = ctx.sampleRate/analyser.fftSize, nb = avgAm.length;
@@ -1597,12 +1601,24 @@ function autoTune(now){
 }
 // glide towards the chosen resonance without wiping the current figure
 function autoGlide(){
+  const now = performance.now();
   for (const L of layers) {
     if (!L.auto || !L.autoTarget) continue;
-    const d = Math.log(L.autoTarget/L.rig); if (Math.abs(d) < 0.004) { if (L.autoMoving) { L.autoMoving = false; saveSettings(); } continue; }
-    L.autoMoving = true;
-    L.rig = Math.exp(Math.log(L.rig) + d*0.06); L.f0 = L.rig;
-    if (L.rigEl) { L.rigEl.value = rig2s(L.rig); L.rigLbl.textContent = fmtRig(L.rig); }
+    const d = Math.log(L.autoTarget/L.rig);
+    if (Math.abs(d) >= 0.004) { L.autoMoving = true; L.rig = Math.exp(Math.log(L.rig) + d*0.06);
+      if (L.rigEl) { L.rigEl.value = rig2s(L.rig); L.rigLbl.textContent = fmtRig(L.rig); } }
+    else if (L.autoMoving) { L.autoMoving = false; saveSettings(); }
+    // life: when the same figure has held for ~1.5 s, nudge the resonance a little off the perfect point and back,
+    // so a neighbouring figure takes over for a moment and the sand keeps travelling
+    // «still» = the resonance has stopped gliding (it sits on its note); the two twin modes of a note may flicker, that is not movement
+    if (L.autoMoving || L.dominant < 0) { if (!L.wT) L.domSince = now; }
+    let off = 0;
+    if (autoVary > 0) {
+      if (!L.wT && L.domSince && now - L.domSince > 1500) {
+        L.wT = now; L.wDur = 1800 + Math.random()*1600; L.wAmt = (Math.random() < 0.5 ? -1 : 1)*(0.05 + Math.random()*0.07)*autoVary*2; }
+      if (L.wT) { const u = (now - L.wT)/L.wDur; if (u >= 1) { L.wT = 0; L.domSince = now; } else off = L.wAmt*Math.sin(Math.PI*u); }
+    } else L.wT = 0;
+    L.f0 = L.rig*Math.exp(off);
   }
 }
 
@@ -1775,7 +1791,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 const KEY = 'chladniSettings.v3';
 let restoring = false, saveTimer = null;
 function snapshot(){
-  return { autoRich, autoSpread, shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
+  return { autoRich, autoSpread, autoVary, shape, view, sens, eq: [...eqDb], eqAudio: eqAudioOn, colorMode, hueSpeed, trail, glow, theme, grain, amount, mScale, mRot, sSpeed, sAmp, rSpeed, rAmp, kOn, kMode, kSeg, kSpeed, kAngle, kZoom, bgColor: toHex(bgColor), bgLevel, tone: +toneR.value,
            layers: layers.map(L => ({name: L.name, hex: L.hex, lo: L.lo, hi: L.hi, rig: L.rig, gain: L.gain, on: L.on, rot: L.rot, scale: L.scale, auto: L.auto})) };
 }
 function saveSettings(){
@@ -1805,6 +1821,7 @@ function applySettings(o){
     if (o.kMode) setKMode(o.kMode);
     if (o.autoRich != null) setRich(o.autoRich);
     if (o.autoSpread != null) setSpread(o.autoSpread);
+    if (o.autoVary != null) setVary(o.autoVary);
     if (o.kSeg) { kSeg = +o.kSeg; kSegR.value = kSeg; }
     if (o.kSpeed != null) { kSpeed = +o.kSpeed; kSpeedR.value = kSpeed; }
     if (o.kAngle != null) { kAngle = +o.kAngle; kAngleR.value = kAngle; }
@@ -1934,6 +1951,9 @@ addEventListener('beforeunload', () => { try { outWin && outWin.close(); } catch
 const richR = document.getElementById('autoRich'), richV = document.getElementById('richVal');
 function setRich(v){ autoRich = Math.max(0, Math.min(1, +v)); richR.value = Math.round(autoRich*100);
   richV.textContent = autoRich < 0.25 ? 'semplice' : autoRich < 0.5 ? 'media' : autoRich < 0.75 ? 'ricca' : 'molto ricca'; }
+const varR = document.getElementById('autoVary'), varV = document.getElementById('varyVal');
+function setVary(v){ autoVary = Math.max(0, Math.min(1, +v)); varR.value = Math.round(autoVary*100); varV.textContent = autoVary ? Math.round(autoVary*100) + '%' : 'spenta'; }
+varR.addEventListener('input', () => setVary(varR.value/100)); setVary(autoVary);
 const sprR = document.getElementById('autoSpread'), sprV = document.getElementById('spreadVal');
 function setSpread(v){ autoSpread = Math.max(1.25, Math.min(4, +v)); sprR.value = Math.round(autoSpread*100); sprV.textContent = '×' + autoSpread.toFixed(2); }
 sprR.addEventListener('input', () => { setSpread(sprR.value/100); lastAuto = 0; layers.forEach(L => { if (L.auto) L.autoTarget = null; }); });
