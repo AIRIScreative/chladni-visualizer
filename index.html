@@ -1584,11 +1584,11 @@ function autoTune(now){
     const r0 = L.autoTarget || L.rig; let [cur, curF] = evalRig(r0, kT); cur = penal(cur, curF, r0);
     let mx = 0, mxR = 0, mxF = 0;
     for (let j = 0; j < 120; j++) {
-      const r = 0.06*Math.pow(2000, j/119); if (r > ub) break;
+      const r = 0.4*Math.pow(300, j/119); if (r > ub) break;   // automatic search stays ≥ 0.4: lower only gives dense, frozen figures
       const [sc, f] = evalRig(r, kT), v = penal(sc, f, r);
       if (v > mx) { mx = v; mxR = r; mxF = f; }
     }
-    if (!mx && r0 > ub) { L.autoTarget = Math.max(0.05, ub*0.95); L.autoNote = 0; nextR = L.autoTarget; continue; }
+    if (!mx && r0 > ub) { L.autoTarget = Math.max(0.4, ub*0.95); L.autoNote = 0; nextR = L.autoTarget; continue; }
     // switch only when clearly better (20%), so the figure doesn't keep hopping
     if (mx > cur*1.2) { const fp = peakNear(mxF); L.autoTarget = mxR*fp/mxF; L.autoNote = fp; taken.push(fp); }
     else { L.autoTarget = L.autoTarget || L.rig; if (curF) { const fp = peakNear(curF); L.autoTarget *= fp/curF; L.autoNote = fp; taken.push(fp); } }
