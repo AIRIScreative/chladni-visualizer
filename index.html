@@ -1505,6 +1505,11 @@ function autoTune(now){
   let gmax = 1e-9; for (let b = 2; b < nb; b++) if (avgAm[b] > gmax) gmax = avgAm[b];
   if (gmax < 1e-5) return;                                   // silence: keep what we have
   const magAt = f => { const lo = Math.max(2, Math.floor(f*0.975/binHz)), hi = Math.min(nb-1, Math.ceil(f*1.025/binHz)); let m = 0; for (let b = lo; b <= hi; b++) if (avgAm[b] > m) m = avgAm[b]; return m/gmax; };
+  // exact position of the music's peak near f (parabolic fit on the averaged spectrum), so the chosen tick sits right on it
+  const peakNear = f => { const lo = Math.max(3, Math.floor(f*0.95/binHz)), hi = Math.min(nb-2, Math.ceil(f*1.05/binHz)); let bm = -1, m = 0;
+    for (let b = lo; b <= hi; b++) if (avgAm[b] > m) { m = avgAm[b]; bm = b; }
+    if (bm < 0) return f; const a = avgAm[bm-1], c = avgAm[bm+1], den = a - 2*m + c, off = den < 0 ? Math.max(-0.5, Math.min(0.5, 0.5*(a - c)/den)) : 0;
+    return (bm + off)*binHz; };
   const taken = [];
   // best note this stiffness would catch; notes another plate already uses count much less
   const evalRig = r => { let best = 0, bf = 0; for (const md of modes) { const f = r*md.k; if (f < 30 || f > 9000) continue;
@@ -1520,8 +1525,8 @@ function autoTune(now){
       if (v > mx) { mx = v; mxR = r; mxF = f; }
     }
     // switch only when clearly better (20%), so the figure doesn't keep hopping
-    if (mx > cur*1.2) { L.autoTarget = mxR; L.autoNote = mxF; taken.push(mxF); }
-    else { L.autoTarget = L.autoTarget || L.rig; if (curF) { L.autoNote = curF; taken.push(curF); } }
+    if (mx > cur*1.2) { const fp = peakNear(mxF); L.autoTarget = mxR*fp/mxF; L.autoNote = fp; taken.push(fp); }
+    else { L.autoTarget = L.autoTarget || L.rig; if (curF) { const fp = peakNear(curF); L.autoTarget *= fp/curF; L.autoNote = fp; taken.push(fp); } }
   }
 }
 // glide towards the chosen resonance without wiping the current figure
